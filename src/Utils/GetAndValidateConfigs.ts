@@ -4,6 +4,7 @@ import type { CacheOptions, FlixPatrolTop10Location, FlixPatrolTop10Platform } f
 import { FlixPatrol } from '../Flixpatrol';
 import { logger } from './Logger';
 import type { TraktAPIOptions } from '../Trakt';
+import { Netflix } from '../Netflix';
 
 export interface FlixPatrolTop10 {
   platform: FlixPatrolTop10Platform;
@@ -11,6 +12,13 @@ export interface FlixPatrolTop10 {
   fallback: FlixPatrolTop10Location | false;
   privacy: TraktPrivacy;
   limit: number;
+  type: string;
+  name?: string;
+}
+
+export interface NetflixTop10 {
+  location: FlixPatrolTop10Location;
+  privacy: TraktPrivacy;
   type: string;
   name?: string;
 }
@@ -38,6 +46,65 @@ export interface FlixPatrolMostWatched {
 
 export class GetAndValidateConfigs {
   private static traktPrivacy: string[] = ['private', 'link', 'friends', 'public'];
+
+  public static getNetflixTop10(): NetflixTop10[] {
+    let netflixTop10Configs: Partial<NetflixTop10>[];
+    try {
+      netflixTop10Configs = config.get('NetflixTop10');
+      netflixTop10Configs.forEach((netflixTop10Config, index) => {
+         // Check if location property is valid
+         if (!Object.prototype.hasOwnProperty.call(netflixTop10Config, 'location')) {
+          logger.error(`Configuration Error: Property "NetflixTop10[${index}].location" -> property not found`);
+          process.exit(1);
+        }
+        if (typeof netflixTop10Config.location !== 'string') {
+          logger.error(`Configuration Error: Property "NetflixTop10[${index}].location" -> not a valid string`);
+          process.exit(1);
+        }
+        if (!Netflix.isNetflixTop10Location(netflixTop10Config.location)) {
+          logger.error(`Configuration Error: Property "NetflixTop10[${index}].location" -> ${netflixTop10Config.location} is not a valid location`);
+          process.exit(1);
+        }
+              // Check if privacy property is valid
+        if (!Object.prototype.hasOwnProperty.call(netflixTop10Config, 'privacy')) {
+          logger.error(`Configuration Error: Property "FlixPatrolTop10[${index}].privacy" -> property not found`);
+          process.exit(1);
+        }
+        if (typeof netflixTop10Config.privacy !== 'string') {
+          logger.error(`Configuration Error: Property "FlixPatrolTop10[${index}].privacy" -> not a valid string`);
+          process.exit(1);
+        }
+        if (!GetAndValidateConfigs.traktPrivacy.includes(netflixTop10Config.privacy)) {
+          logger.error(`Configuration Error: Property "FlixPatrolTop10[${index}].privacy" -> ${netflixTop10Config.privacy} is not a valid privacy`);
+          process.exit(1);
+        }
+        // Check if type property is valid
+        if (!Object.prototype.hasOwnProperty.call(netflixTop10Config, 'type')) {
+          logger.error(`Configuration Error: Property "FlixPatrolTop10[${index}].type" -> type not found`);
+          process.exit(1);
+        }
+        if (typeof netflixTop10Config.type !== 'string') {
+          logger.error(`Configuration Error: Property "FlixPatrolTop10[${index}].type" -> not a valid string`);
+          process.exit(1);
+        }
+        if (!FlixPatrol.isFlixPatrolType(netflixTop10Config.type)) {
+          logger.error(`Configuration Error: Property "FlixPatrolTop10[${index}].type" -> ${netflixTop10Config.type} is not a valid type. Must be 'movies', 'shows' or 'both'`);
+          process.exit(1);
+        }
+
+        // Check if optional name property is valid
+        if (typeof netflixTop10Config.name !== 'string' && netflixTop10Config.name !== undefined) {
+          logger.error(`Configuration Error: Property "FlixPatrolTop10[${index}].name" -> not a valid string`);
+          process.exit(1);
+        }
+      });
+        
+    } catch (err) {
+      logger.error(`Configuration Error: ${err}`);
+      process.exit(1);
+    }
+    return netflixTop10Configs as NetflixTop10[];
+  }
 
   public static getFlixPatrolTop10(): FlixPatrolTop10[] {
     let flixPatrolTop10Configs: Partial<FlixPatrolTop10>[];

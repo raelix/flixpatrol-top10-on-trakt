@@ -1,4 +1,13 @@
 {
+  "NetflixTop10": [
+    {
+      "location": "italy",
+      "privacy": "public",
+      "limit": 10,
+      "name": "Netflix Top 10",
+      "type": "both"
+    }
+  ],
   "FlixPatrolTop10": [
     {
       "platform": "netflix",

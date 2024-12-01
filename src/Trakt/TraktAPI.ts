@@ -206,7 +206,7 @@ export class TraktAPI {
   }
 
   // eslint-disable-next-line max-len
-  public async getFirstItemByQuery(searchType: TraktSearchType, title: string, year: number): Promise<TraktSearchItem | null> {
+  public async getFirstItemByQuery(searchType: TraktSearchType, title: string, year: number | null): Promise<TraktSearchItem | null> {
     const items = await this.trakt.search.text({
       type: searchType,
       query: title,
@@ -216,10 +216,10 @@ export class TraktAPI {
     logger.silly(`Items found on Trakt: ${JSON.stringify(items)}`)
 
     for (const item of items) {
-      if (searchType === 'movie' && item.movie?.year === year) {
+      if (searchType === 'movie' && (year === null || item.movie?.year === year)) {
         return item;
       }
-      if (searchType === 'show' && item.show?.year === year) {
+      if (searchType === 'show' && (year === null || item.show?.year === year)) {
         return item;
       }
     }
