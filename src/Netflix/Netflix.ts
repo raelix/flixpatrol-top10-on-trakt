@@ -86,7 +86,7 @@ export class Netflix {
     html: string,
     isMovie : boolean = true
   ): string[] {
-    const expression = '//*[@id="weekly-lists"]//table/tbody/tr[*]/td[2]';
+    const expression = '//table/tbody/tr[*]/td[1]/button';
     return Netflix.parsePage(expression, html, isMovie);
   }
 
