@@ -226,7 +226,7 @@ export class FlixPatrol {
       id = item && item.show && item.show.ids.trakt ? item.show.ids.trakt : null;
     }
 
-    logger.silly(`Matched item: ${JSON.stringify(item)}`);
+    console.log(`Matched item: ${JSON.stringify(item)}`);
     logger.silly(`Trakt id: ${id}`);
 
     if (id && this.tvCache !== null && this.movieCache !== null) {

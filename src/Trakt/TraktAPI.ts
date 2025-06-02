@@ -213,7 +213,7 @@ export class TraktAPI {
       fields: 'title',
     });
 
-    logger.silly(`Items found on Trakt: ${JSON.stringify(items)}`)
+    console.log(`Items found on Trakt: ${JSON.stringify(items)}`)
 
     for (const item of items) {
       if (searchType === 'movie' && (year === null || item.movie?.year === year)) {
