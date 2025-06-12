@@ -72,7 +72,7 @@ export class TraktAPI {
         logger.warn(`List ${listName} was not found on trakt, creating it`);
         try {
           // Avoid Trakt rate limit
-          await Utils.sleep(2000);
+          await Utils.sleep(5000);
           list = await this.trakt.users.lists.create({ username: 'me', name: listName, privacy });
         } catch (createErr) {
           logger.error(`Trakt Error (createList): ${(createErr as Error).message}`);
@@ -141,7 +141,7 @@ export class TraktAPI {
     }
     try {
       // Avoid Trakt rate limit
-      await Utils.sleep(2000);
+      await Utils.sleep(5000);
       await this.trakt.users.list.items.remove(body);
     } catch (err) {
       logger.error(`Trakt Error (removeItems): ${(err as Error).message}`);
@@ -172,7 +172,7 @@ export class TraktAPI {
     }
     try {
       // Avoid Trakt rate limit
-      await Utils.sleep(2000);
+      await Utils.sleep(5000);
       await this.trakt.users.list.items.add(body);
     } catch (err) {
       logger.error(`Trakt Error (addItems): ${(err as Error).message}`);
@@ -185,7 +185,7 @@ export class TraktAPI {
     if (list.privacy !== privacy) {
       logger.info(`Trakt list ${list.ids.slug} privacy doesn't match the wanted privacy (${privacy}), updating list privacy`);
       // Avoid Trakt rate limit
-      await Utils.sleep(2000);
+      await Utils.sleep(5000);
       list = await this.trakt.users.list.update({ username: 'me', id: listName, privacy });
     }
     const items = await this.getListItems(list, type);
@@ -194,7 +194,7 @@ export class TraktAPI {
     }
     if (traktTVIDs.length > 0) {
       await this.addItemsToList(list, traktTVIDs, type);
-      await Utils.sleep(2000);
+      await Utils.sleep(5000);
       const dateOptions: Intl.DateTimeFormatOptions = {
         weekday: 'short', day: 'numeric', month: 'long', hour: '2-digit', minute: '2-digit', hour12: false, timeZoneName: 'short',
       };
