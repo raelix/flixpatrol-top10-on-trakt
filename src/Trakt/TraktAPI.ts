@@ -27,12 +27,62 @@ export class TraktAPI {
 
   private readonly traktSaveFile: string;
 
+  private lastRequestTime: number = 0;
+
+  private readonly minDelay: number = 1100; // Minimum 1.1 seconds between requests
+
   constructor(options: TraktAPIOptions) {
     this.trakt = new Trakt({
       client_id: options.clientId,
       client_secret: options.clientSecret,
     });
     this.traktSaveFile = options.saveFile;
+  }
+
+  private async waitForRateLimit(): Promise<void> {
+    const now = Date.now();
+    const timeSinceLastRequest = now - this.lastRequestTime;
+    
+    if (timeSinceLastRequest < this.minDelay) {
+      const waitTime = this.minDelay - timeSinceLastRequest;
+      logger.debug(`Rate limiting: waiting ${waitTime}ms before next request`);
+      await Utils.sleep(waitTime);
+    }
+    
+    this.lastRequestTime = Date.now();
+  }
+
+  private async makeRateLimitedRequest<T>(requestFn: () => Promise<T>, operationName: string, maxRetries: number = 3): Promise<T> {
+    let attempt = 0;
+    
+    while (attempt < maxRetries) {
+      try {
+        await this.waitForRateLimit();
+        return await requestFn();
+      } catch (error) {
+        const errorMessage = (error as Error).message;
+        
+        // Handle rate limit errors (420, 429)
+        if (errorMessage.includes('420') || errorMessage.includes('429')) {
+          attempt++;
+          const backoffDelay = Math.min(5000 * Math.pow(2, attempt - 1), 30000); // Exponential backoff, max 30s
+          logger.warn(`Rate limited on ${operationName} (attempt ${attempt}/${maxRetries}). Waiting ${backoffDelay}ms before retry`);
+          
+          if (attempt >= maxRetries) {
+            logger.error(`Max retries exceeded for ${operationName}. Rate limit error: ${errorMessage}`);
+            throw error;
+          }
+          
+          await Utils.sleep(backoffDelay);
+          continue;
+        }
+        
+        // Re-throw non-rate-limit errors immediately
+        throw error;
+      }
+    }
+    
+    throw new Error(`Unexpected: exceeded max retries without success for ${operationName}`);
   }
 
   public async connect() {
@@ -70,14 +120,10 @@ export class TraktAPI {
     } catch (getErr) {
       if ((getErr as Error).message.includes('404 (Not Found)')) {
         logger.warn(`List ${listName} was not found on trakt, creating it`);
-        try {
-          // Avoid Trakt rate limit
-          await Utils.sleep(5000);
-          list = await this.trakt.users.lists.create({ username: 'me', name: listName, privacy });
-        } catch (createErr) {
-          logger.error(`Trakt Error (createList): ${(createErr as Error).message}`);
-          process.exit(1);
-        }
+        list = await this.makeRateLimitedRequest(
+          () => this.trakt.users.lists.create({ username: 'me', name: listName, privacy }),
+          'createList'
+        );
       } else {
         logger.error(`Trakt Error (getList): ${(getErr as Error).message}`);
         process.exit(1);
@@ -139,14 +185,10 @@ export class TraktAPI {
     } else {
       body.shows = toRemove;
     }
-    try {
-      // Avoid Trakt rate limit
-      await Utils.sleep(5000);
-      await this.trakt.users.list.items.remove(body);
-    } catch (err) {
-      logger.error(`Trakt Error (removeItems): ${(err as Error).message}`);
-      process.exit(1);
-    }
+    await this.makeRateLimitedRequest(
+      () => this.trakt.users.list.items.remove(body),
+      'removeItems'
+    );
   }
 
   private async addItemsToList(list: TraktList, traktTVIDs: TraktTVIds, type: TraktType) {
@@ -170,23 +212,20 @@ export class TraktAPI {
     } else {
       body.shows = toAdd;
     }
-    try {
-      // Avoid Trakt rate limit
-      await Utils.sleep(5000);
-      await this.trakt.users.list.items.add(body);
-    } catch (err) {
-      logger.error(`Trakt Error (addItems): ${(err as Error).message}`);
-      process.exit(1);
-    }
+    await this.makeRateLimitedRequest(
+      () => this.trakt.users.list.items.add(body),
+      'addItems'
+    );
   }
 
   public async pushToList(traktTVIDs: TraktTVIds, listName: string, type: TraktType, privacy: TraktPrivacy) {
     let list = await this.getList(listName, privacy);
     if (list.privacy !== privacy) {
       logger.info(`Trakt list ${list.ids.slug} privacy doesn't match the wanted privacy (${privacy}), updating list privacy`);
-      // Avoid Trakt rate limit
-      await Utils.sleep(5000);
-      list = await this.trakt.users.list.update({ username: 'me', id: listName, privacy });
+      list = await this.makeRateLimitedRequest(
+        () => this.trakt.users.list.update({ username: 'me', id: listName, privacy }),
+        'updateListPrivacy'
+      );
     }
     const items = await this.getListItems(list, type);
     if (items.length > 0) {
@@ -194,24 +233,29 @@ export class TraktAPI {
     }
     if (traktTVIDs.length > 0) {
       await this.addItemsToList(list, traktTVIDs, type);
-      await Utils.sleep(5000);
       const dateOptions: Intl.DateTimeFormatOptions = {
         weekday: 'short', day: 'numeric', month: 'long', hour: '2-digit', minute: '2-digit', hour12: false, timeZoneName: 'short',
       };
-      const currentDate = new Date().toLocaleString(undefined, dateOptions); // Get the current date and time
-      const updatedString = `Last Updated: ${currentDate}`; // Concatenate the string with the current date and time
+      const currentDate = new Date().toLocaleString(undefined, dateOptions);
+      const updatedString = `Last Updated: ${currentDate}`;
       logger.info(`Updating list description: "${updatedString}"`);
-      await this.trakt.users.list.update({ username: 'me', id: listName, description: updatedString });
+      await this.makeRateLimitedRequest(
+        () => this.trakt.users.list.update({ username: 'me', id: listName, description: updatedString }),
+        'updateListDescription'
+      );
     }
   }
 
   // eslint-disable-next-line max-len
   public async getFirstItemByQuery(searchType: TraktSearchType, title: string, year: number | null): Promise<TraktSearchItem | null> {
-    const items = await this.trakt.search.text({
-      type: searchType,
-      query: title,
-      fields: 'title',
-    });
+    const items = await this.makeRateLimitedRequest(
+      () => this.trakt.search.text({
+        type: searchType,
+        query: title,
+        fields: 'title',
+      }),
+      'searchText'
+    );
 
     console.log(`Items found on Trakt: ${JSON.stringify(items)}`)
 
