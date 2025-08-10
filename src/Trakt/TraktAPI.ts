@@ -31,6 +31,8 @@ export class TraktAPI {
 
   private readonly minDelay: number = 1100; // Minimum 1.1 seconds between requests
 
+  private readonly maxItemsPerChunk: number = 100; // Conservative chunk size to avoid 420 errors
+
   constructor(options: TraktAPIOptions) {
     this.trakt = new Trakt({
       client_id: options.clientId,
@@ -62,8 +64,13 @@ export class TraktAPI {
       } catch (error) {
         const errorMessage = (error as Error).message;
         
-        // Handle rate limit errors (420, 429)
-        if (errorMessage.includes('420') || errorMessage.includes('429')) {
+        // Handle account limit errors (420) and rate limit errors (429)
+        if (errorMessage.includes('420')) {
+          logger.error(`Account limit exceeded on ${operationName}. Error: ${errorMessage}`);
+          logger.error(`This usually means you're trying to add too many items at once or have exceeded your account limits.`);
+          logger.error(`Consider upgrading to Trakt VIP or reduce the number of items per operation.`);
+          throw error;
+        } else if (errorMessage.includes('429')) {
           attempt++;
           const backoffDelay = Math.min(5000 * Math.pow(2, attempt - 1), 30000); // Exponential backoff, max 30s
           logger.warn(`Rate limited on ${operationName} (attempt ${attempt}/${maxRetries}). Waiting ${backoffDelay}ms before retry`);
@@ -83,6 +90,14 @@ export class TraktAPI {
     }
     
     throw new Error(`Unexpected: exceeded max retries without success for ${operationName}`);
+  }
+
+  private chunkArray<T>(array: T[], chunkSize: number): T[][] {
+    const chunks: T[][] = [];
+    for (let i = 0; i < array.length; i += chunkSize) {
+      chunks.push(array.slice(i, i + chunkSize));
+    }
+    return chunks;
   }
 
   public async connect() {
@@ -164,58 +179,80 @@ export class TraktAPI {
   }
 
   private async removeListItems(list: TraktList, items: TraktItem[], type: TraktType): Promise<void> {
-    logger.info(`Trakt list ${list.ids.slug} contain ${items.length} ${type}, removing them`);
+    logger.info(`Trakt list ${list.ids.slug} contain ${items.length} ${type}, removing them in chunks`);
+    
     const toRemove: { ids: TraktIds }[] = [];
     items.forEach((item) => {
       const id = TraktAPI.getItemTraktId(item);
       toRemove.push({ ids: { trakt: id } });
     });
-    logger.silly(`Trakt id items to remove: ${JSON.stringify(toRemove)}`)
-    const body: UsersListItemsAddRemove = {
-      id: `${list.ids.trakt}`,
-      username: 'me',
-      movies: [],
-      shows: [],
-      seasons: [],
-      episodes: [],
-      people: [],
-    };
-    if (type === 'movie') {
-      body.movies = toRemove;
-    } else {
-      body.shows = toRemove;
+    
+    const chunks = this.chunkArray(toRemove, this.maxItemsPerChunk);
+    logger.info(`Removing ${toRemove.length} items in ${chunks.length} chunks of max ${this.maxItemsPerChunk} items`);
+    
+    for (let i = 0; i < chunks.length; i++) {
+      const chunk = chunks[i];
+      logger.info(`Processing removal chunk ${i + 1}/${chunks.length} with ${chunk.length} items`);
+      
+      const body: UsersListItemsAddRemove = {
+        id: `${list.ids.trakt}`,
+        username: 'me',
+        movies: [],
+        shows: [],
+        seasons: [],
+        episodes: [],
+        people: [],
+      };
+      
+      if (type === 'movie') {
+        body.movies = chunk;
+      } else {
+        body.shows = chunk;
+      }
+      
+      await this.makeRateLimitedRequest(
+        () => this.trakt.users.list.items.remove(body),
+        `removeItems-chunk-${i + 1}`
+      );
     }
-    await this.makeRateLimitedRequest(
-      () => this.trakt.users.list.items.remove(body),
-      'removeItems'
-    );
   }
 
   private async addItemsToList(list: TraktList, traktTVIDs: TraktTVIds, type: TraktType) {
-    logger.info(`Adding ${traktTVIDs.length} ${type} into Trakt list ${list.ids.slug}`);
+    logger.info(`Adding ${traktTVIDs.length} ${type} into Trakt list ${list.ids.slug} in chunks`);
+    
     const toAdd: { ids: TraktIds }[] = [];
     traktTVIDs.forEach((traktTVID) => {
       toAdd.push({ ids: { trakt: traktTVID } });
     });
-    logger.silly(`Trakt id items to add: ${JSON.stringify(toAdd)}`)
-    const body: UsersListItemsAddRemove = {
-      id: `${list.ids.trakt}`,
-      username: 'me',
-      movies: [],
-      shows: [],
-      seasons: [],
-      episodes: [],
-      people: [],
-    };
-    if (type === 'movie') {
-      body.movies = toAdd;
-    } else {
-      body.shows = toAdd;
+    
+    const chunks = this.chunkArray(toAdd, this.maxItemsPerChunk);
+    logger.info(`Adding ${toAdd.length} items in ${chunks.length} chunks of max ${this.maxItemsPerChunk} items`);
+    
+    for (let i = 0; i < chunks.length; i++) {
+      const chunk = chunks[i];
+      logger.info(`Processing addition chunk ${i + 1}/${chunks.length} with ${chunk.length} items`);
+      
+      const body: UsersListItemsAddRemove = {
+        id: `${list.ids.trakt}`,
+        username: 'me',
+        movies: [],
+        shows: [],
+        seasons: [],
+        episodes: [],
+        people: [],
+      };
+      
+      if (type === 'movie') {
+        body.movies = chunk;
+      } else {
+        body.shows = chunk;
+      }
+      
+      await this.makeRateLimitedRequest(
+        () => this.trakt.users.list.items.add(body),
+        `addItems-chunk-${i + 1}`
+      );
     }
-    await this.makeRateLimitedRequest(
-      () => this.trakt.users.list.items.add(body),
-      'addItems'
-    );
   }
 
   public async pushToList(traktTVIDs: TraktTVIds, listName: string, type: TraktType, privacy: TraktPrivacy) {
